@@ -18,7 +18,7 @@ from ragas.metrics import (
 def eval_framework(filepath, customchain, myllm, testsize ):
 
     # Load your doc
-    loader = DirectoryLoader(filepath, glob="*.pdf", loader_cls=PyPDFLoader)
+    loader = PyPDFLoader(filepath)
     documents = loader.load()
 
     # Document Splitter
@@ -44,6 +44,54 @@ def eval_framework(filepath, customchain, myllm, testsize ):
     test_df = testset.to_pandas()
     test_questions = test_df["question"].values.tolist()
     test_groundtruths = test_df["ground_truth"].values.tolist()
+
+    # Generate responses using our Advanced RAG pipeline using the questions we’ve generated.
+    adv_answers = []
+    adv_contexts = []
+
+    for question in test_questions:
+        response = customchain.invoke({"query" : question})
+        adv_answers.append(response["result"])
+        adv_contexts.append([context.page_content for context in response['source_documents']])
+
+    #wrap into huggingface dataset
+    response_dataset_advanced_retrieval = Dataset.from_dict({
+        "question" : test_questions,
+        "answer" : adv_answers,
+        "contexts" : adv_contexts,
+        "ground_truth" : test_groundtruths
+    })
+
+    metrics = [
+        faithfulness,
+        answer_relevancy,
+        context_recall,
+        context_precision,
+        answer_correctness,
+    ]
+
+    advanced_retrieval_results = evaluate(response_dataset_advanced_retrieval, metrics, llm=myllm, embeddings=embeddings, raise_exceptions=False)
+    
+    return advanced_retrieval_results
+
+def eval_frameworkv2(filepath, groundtruthdataset, customchain, myllm):
+
+    # Load your doc
+    loader = PyPDFLoader(filepath)
+    documents = loader.load()
+
+    # Document Splitter
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size = 1000,
+        chunk_overlap = 200
+    )
+    documents = text_splitter.split_documents(documents)
+    #
+    embeddings = HuggingFaceEmbeddings()
+    #
+    usertestdf = pd.read_csv(groundtruthdataset)
+    test_questions = usertestdf["question"].values.tolist()
+    test_groundtruths = usertestdf["ground_truth"].values.tolist()
 
     # Generate responses using our Advanced RAG pipeline using the questions we’ve generated.
     adv_answers = []
